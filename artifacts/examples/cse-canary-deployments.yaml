@@ -1,0 +1,364 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server2
+  namespace: cse-default
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 0
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      oam.cse.alibaba-inc.com/object-id: server2
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        pod.beta1.sigma.ali/naming-register-state: working_online
+        pod.beta1.sigma.ali/request-alloc-spec: '{"containers":[{"name":"main","resource":{"cpu":{"cpuSet":{"spreadStrategy":"spread"}}}}]}'
+        pods.sigma.alibaba-inc.com/inject-pod-sn: "true"
+        sigma.ali/use-unified-pv: "false"
+        a: "cdd"
+      labels:
+        oam.cse.alibaba-inc.com/object-id: server2
+        sigma.ali/app-name: ginkgo-rsocket-broker
+        sigma.ali/instance-group: ginkgo-rsocket-broker.daily
+        sigma.alibaba-inc.com/app-stage: DAILY
+        sigma.alibaba-inc.com/app-unit: CENTER_UNIT.center
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cse-core.alibaba-inc.com/dedicated
+                    operator: Exists
+                  - key: cse-core.alibaba-inc.com/node-pool
+                    operator: In
+                    values:
+                      - online
+                  - key: sigma.alibaba-inc.com/app-stage
+                    operator: In
+                    values:
+                      - DAILY
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - -c
+            - sleep 999999 && echo Sleep expired > /dev/termination-log
+          command:
+            - /bin/sh
+          env:
+            - name: CSE_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
+            - name: CSE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: CSE_NODE_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.hostIP
+            - name: CSE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: CSE_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: CSE_POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+          image: busybox:musl
+          imagePullPolicy: Always
+          name: main
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1024M
+            requests:
+              cpu: "2"
+              memory: 1024M
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /home/staragent/plugins
+              name: plugins-dir
+        - command:
+            - sh
+            - -c
+            - sudo sh /opt/taobao/sshd.sh & sudo sh /opt/taobao/staragent.sh && sleep
+              99999999
+          env:
+            - name: K8S_CONTAINER_NAME
+              value: staragent
+            - name: IS_SIDECAR
+              value: "true"
+            - name: SIGMA_IGNORE_RESOURCE
+              value: "true"
+            - name: SIGMA_IGNORE_READY
+              value: "true"
+            - name: SN
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.ali/sn']
+            - name: SIGMA_APP_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.ali/app-name']
+            - name: SIGMA_APP_UNIT
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.alibaba-inc.com/app-unit']
+            - name: SIGMA_APP_STAGE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.alibaba-inc.com/app-stage']
+            - name: SIGMA_APP_GROUP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.ali/instance-group']
+          image: reg.docker.alibaba-inc.com/mw-serverless/serverless-base:sidecar.v2
+          imagePullPolicy: IfNotPresent
+          name: cse-sidecar
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /home/staragent/plugins
+              name: plugins-dir
+      dnsPolicy: Default
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 10
+      tolerations:
+        - effect: NoSchedule
+          key: cse-core.alibaba-inc.com/dedicated
+        - effect: NoSchedule
+          key: sigma.ali/is-ecs
+          operator: Equal
+          value: "true"
+        - effect: NoSchedule
+          key: sigma.ali/server-owner
+          operator: Equal
+          value: cse-core
+        - effect: NoSchedule
+          key: sigma.ali/resource-pool
+          operator: Equal
+          value: sigma_public
+        - effect: NoSchedule
+          key: sigma.alibaba-inc.com/app-stage
+          operator: Equal
+          value: DAILY
+      volumes:
+        - emptyDir: {}
+          name: plugins-dir
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server1
+  namespace: cse-default
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 3
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      oam.cse.alibaba-inc.com/object-id: server1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        pod.beta1.sigma.ali/naming-register-state: working_online
+        pod.beta1.sigma.ali/request-alloc-spec: '{"containers":[{"name":"main","resource":{"cpu":{"cpuSet":{"spreadStrategy":"spread"}}}}]}'
+        pods.sigma.alibaba-inc.com/inject-pod-sn: "true"
+        sigma.ali/use-unified-pv: "false"
+        a: "dd"
+      labels:
+        oam.cse.alibaba-inc.com/object-id: server1
+        sigma.ali/app-name: ginkgo-rsocket-broker
+        sigma.ali/instance-group: ginkgo-rsocket-broker.daily
+        sigma.alibaba-inc.com/app-stage: DAILY
+        sigma.alibaba-inc.com/app-unit: CENTER_UNIT.center
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cse-core.alibaba-inc.com/dedicated
+                    operator: Exists
+                  - key: cse-core.alibaba-inc.com/node-pool
+                    operator: In
+                    values:
+                      - online
+                  - key: sigma.alibaba-inc.com/app-stage
+                    operator: In
+                    values:
+                      - DAILY
+      automountServiceAccountToken: false
+      containers:
+        - args:
+            - -c
+            - sleep 9999999 && echo Sleep expired > /dev/termination-log
+          command:
+            - /bin/sh
+          env:
+            - name: CSE_INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.uid
+            - name: CSE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: CSE_NODE_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.hostIP
+            - name: CSE_POD_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: CSE_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+            - name: CSE_POD_IP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: status.podIP
+          image: busybox:musl
+          imagePullPolicy: Always
+          name: main
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1024M
+            requests:
+              cpu: "2"
+              memory: 1024M
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /home/staragent/plugins
+              name: plugins-dir
+        - command:
+            - sh
+            - -c
+            - sudo sh /opt/taobao/sshd.sh & sudo sh /opt/taobao/staragent.sh && sleep
+              99999999
+          env:
+            - name: K8S_CONTAINER_NAME
+              value: staragent
+            - name: IS_SIDECAR
+              value: "true"
+            - name: SIGMA_IGNORE_RESOURCE
+              value: "true"
+            - name: SIGMA_IGNORE_READY
+              value: "true"
+            - name: SN
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.ali/sn']
+            - name: SIGMA_APP_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.ali/app-name']
+            - name: SIGMA_APP_UNIT
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.alibaba-inc.com/app-unit']
+            - name: SIGMA_APP_STAGE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.alibaba-inc.com/app-stage']
+            - name: SIGMA_APP_GROUP
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.labels['sigma.ali/instance-group']
+          image: reg.docker.alibaba-inc.com/mw-serverless/serverless-base:sidecar.v2
+          imagePullPolicy: IfNotPresent
+          name: cse-sidecar
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /home/staragent/plugins
+              name: plugins-dir
+      dnsPolicy: Default
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 10
+      tolerations:
+        - effect: NoSchedule
+          key: cse-core.alibaba-inc.com/dedicated
+        - effect: NoSchedule
+          key: sigma.ali/is-ecs
+          operator: Equal
+          value: "true"
+        - effect: NoSchedule
+          key: sigma.ali/server-owner
+          operator: Equal
+          value: cse-core
+        - effect: NoSchedule
+          key: sigma.ali/resource-pool
+          operator: Equal
+          value: sigma_public
+        - effect: NoSchedule
+          key: sigma.alibaba-inc.com/app-stage
+          operator: Equal
+          value: DAILY
+      volumes:
+        - emptyDir: {}
+          name: plugins-dir

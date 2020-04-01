@@ -1,0 +1,57 @@
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: server
+  namespace: cse-default
+spec:
+  provider: "smi:cse"
+  progressDeadlineSeconds: 600
+  sourceRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: server2
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: server1
+  service:
+    port: 8080
+  analysis:
+    interval: 20s
+    threshold: 10
+    maxReplicas: 3
+    stepReplicas: 1
+    stepWeight: 33
+    maxWeight: 100
+    alerts:
+      - name: dingtalk
+        severity: info
+        providerRef:
+          name: server-owner-notify
+          namespace: cse-default
+    webhooks:
+      - name: confirm
+        type: confirm-rollout
+        url: http://localhost:8080/healthz
+---
+apiVersion: flagger.app/v1beta1
+kind: AlertProvider
+metadata:
+  name: server-owner-notify
+  namespace: cse-default
+spec:
+  type: dingtalk
+  channel: notify-text
+  username: "060004"
+  secretRef:
+    name: cse-dingtalk-pre
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cse-dingtalk-pre
+  namespace: cse-default
+type: Opaque
+data:
+  address: aHR0cHM6Ly9hb25lOnQ4amhta3B0bTNjdTFvOGlycmxybWMwYWowQHByZS1vYW0tYXBpLmFsaWJhYmEtaW5jLmNvbS9hcGlzL2ludGVybmFs

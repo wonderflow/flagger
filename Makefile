@@ -12,6 +12,14 @@ push:
 	docker tag weaveworks/flagger:$(TAG) weaveworks/flagger:$(VERSION)
 	docker push weaveworks/flagger:$(VERSION)
 
+# Usage example: make aliyun-push-test TAG=latest NAMESPACE=edas_test1 REPO=flagger-controller:latest
+aliyun-push-test:
+	sh ./imageUpload/dispatch-test.sh
+
+# Usage example: make aliyun-push-prod TAG=latest NAMESPACE=edas_unified REPO=flagger-controller:1.0.0
+aliyun-push-prod:
+	sh ./imageUpload/dispatch-prod.sh
+
 fmt:
 	gofmt -l -s -w ./
 	goimports -l -w ./
