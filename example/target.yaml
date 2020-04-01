@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-demo-canary
+  labels:
+    app: example
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: example-canary
+  template:
+    metadata:
+      labels:
+        app: example-canary
+        routeId: example
+    spec:
+      containers:
+        - name: example
+          image: registry-vpc.cn-beijing.aliyuncs.com/edas_test1/example-demo:v2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: k1
+              value: v1
+            - name: k3
+              value: v3

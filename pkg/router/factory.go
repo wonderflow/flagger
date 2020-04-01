@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/weaveworks/flagger/pkg/internal"
 	"strings"
 
 	"go.uber.org/zap"
@@ -36,23 +37,37 @@ func NewFactory(kubeConfig *restclient.Config, kubeClient kubernetes.Interface,
 
 // KubernetesRouter returns a KubernetesRouter interface implementation
 func (factory *Factory) KubernetesRouter(kind string, labelSelector string, annotations map[string]string, ports map[string]int32) KubernetesRouter {
+	if internal.IsNoopRoute() {
+		return &KubernetesNoopRouter{}
+	}
 	switch kind {
 	case "Service":
 		return &KubernetesNoopRouter{}
 	default: // Daemonset or Deployment
-		return &KubernetesDefaultRouter{
-			logger:        factory.logger,
-			flaggerClient: factory.flaggerClient,
-			kubeClient:    factory.kubeClient,
-			labelSelector: labelSelector,
-			annotations:   annotations,
-			ports:         ports,
+		return &ExtKubernetesDefaultRouter{
+			innerK8sRouter: &KubernetesDefaultRouter{
+				logger:        factory.logger,
+				flaggerClient: factory.flaggerClient,
+				kubeClient:    factory.kubeClient,
+				labelSelector: labelSelector,
+				annotations:   annotations,
+				ports:         ports,
+			},
 		}
 	}
 }
 
 // MeshRouter returns a service mesh router
 func (factory *Factory) MeshRouter(provider string) Interface {
+	return  &RouterScalableWrapper{
+		logger:        factory.logger,
+		flaggerClient: factory.flaggerClient,
+		kubeClient:        factory.kubeClient,
+		innerRouter: factory.innerMeshRouter(provider),
+	}
+}
+
+func (factory *Factory) innerMeshRouter(provider string) Interface {
 	switch {
 	case provider == "none":
 		return &NopRouter{}
@@ -73,6 +88,17 @@ func (factory *Factory) MeshRouter(provider string) Interface {
 		}
 	case strings.HasPrefix(provider, "smi:"):
 		mesh := strings.TrimPrefix(provider, "smi:")
+		if mesh == "cse" {
+			return &RollingUpdateSmiRouter{
+				SmiRouter: &SmiRouter{
+					logger:        factory.logger,
+					flaggerClient: factory.flaggerClient,
+					kubeClient:    factory.kubeClient,
+					smiClient:     factory.meshClient,
+					targetMesh:    "cse",
+				},
+			}
+		}
 		return &SmiRouter{
 			logger:        factory.logger,
 			flaggerClient: factory.flaggerClient,
@@ -138,3 +164,5 @@ func (factory *Factory) MeshRouter(provider string) Interface {
 		}
 	}
 }
+
+

@@ -31,7 +31,7 @@ func syncCanaryStatus(flaggerClient clientset.Interface, cd *flaggerv1.Canary, s
 		cdCopy.Status.FailedChecks = status.FailedChecks
 		cdCopy.Status.Iterations = status.Iterations
 		cdCopy.Status.LastAppliedSpec = hash
-		cdCopy.Status.LastTransitionTime = metav1.Now()
+		//cdCopy.Status.LastTransitionTime = metav1.Now()
 		setAll(cdCopy)
 
 		if ok, conditions := MakeStatusConditions(cd, status.Phase); ok {
@@ -63,7 +63,7 @@ func setStatusFailedChecks(flaggerClient clientset.Interface, cd *flaggerv1.Cana
 		}
 		cdCopy := cd.DeepCopy()
 		cdCopy.Status.FailedChecks = val
-		cdCopy.Status.LastTransitionTime = metav1.Now()
+		//cdCopy.Status.LastTransitionTime = metav1.Now()
 
 		if err = updateStatusWithUpgrade(flaggerClient, cdCopy); err != nil {
 			return fmt.Errorf("updateStatusWithUpgrade failed: %w", err)
@@ -89,7 +89,7 @@ func setStatusWeight(flaggerClient clientset.Interface, cd *flaggerv1.Canary, va
 		}
 		cdCopy := cd.DeepCopy()
 		cdCopy.Status.CanaryWeight = val
-		cdCopy.Status.LastTransitionTime = metav1.Now()
+		//cdCopy.Status.LastTransitionTime = metav1.Now()
 
 		if err = updateStatusWithUpgrade(flaggerClient, cdCopy); err != nil {
 			return fmt.Errorf("updateStatusWithUpgrade failed: %w", err)
@@ -116,7 +116,7 @@ func setStatusIterations(flaggerClient clientset.Interface, cd *flaggerv1.Canary
 
 		cdCopy := cd.DeepCopy()
 		cdCopy.Status.Iterations = val
-		cdCopy.Status.LastTransitionTime = metav1.Now()
+		//cdCopy.Status.LastTransitionTime = metav1.Now()
 
 		if err = updateStatusWithUpgrade(flaggerClient, cdCopy); err != nil {
 			return fmt.Errorf("updateStatusWithUpgrade failed: %w", err)
@@ -144,7 +144,7 @@ func setStatusPhase(flaggerClient clientset.Interface, cd *flaggerv1.Canary, pha
 
 		cdCopy := cd.DeepCopy()
 		cdCopy.Status.Phase = phase
-		cdCopy.Status.LastTransitionTime = metav1.Now()
+		//cdCopy.Status.LastTransitionTime = metav1.Now()
 
 		if phase != flaggerv1.CanaryPhaseProgressing && phase != flaggerv1.CanaryPhaseWaiting {
 			cdCopy.Status.CanaryWeight = 0
