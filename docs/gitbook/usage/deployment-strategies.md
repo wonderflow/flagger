@@ -2,7 +2,7 @@
 
 Flagger can run automated application analysis, promotion and rollback for the following deployment strategies:
 * **Canary Release** (progressive traffic shifting)
-    * Istio, Linkerd, App Mesh, NGINX, Contour, Gloo
+    * Istio, Linkerd, App Mesh, NGINX, Skipper, Contour, Gloo
 * **A/B Testing** (HTTP headers and cookies traffic routing)
     * Istio, App Mesh, NGINX, Contour
 * **Blue/Green** (traffic switching)
@@ -43,13 +43,16 @@ Spec:
     # canary increment step
     # percentage (0-100)
     stepWeight: 2
+    # promotion increment step (default 100)
+    # percentage (0-100)
+    stepWeightPromotion: 100
   # deploy straight to production without
   # the metrics and webhook checks
   skipAnalysis: false
 ```
 
 The above analysis, if it succeeds, will run for 25 minutes while validating the HTTP metrics and webhooks every minute.
-You can determine the minimum time that it takes to validate and promote a canary deployment using this formula:
+You can determine the minimum time it takes to validate and promote a canary deployment using this formula:
 
 ```
 interval * (maxWeight / stepWeight)
@@ -60,6 +63,10 @@ And the time it takes for a canary to be rollback when the metrics or webhook ch
 ```
 interval * threshold 
 ```
+
+When `stepWeightPromotion` is specified, the promotion phase happens in stages,
+the traffic is routed back to the primary pods in a progressive manner,
+the primary weight is increased until it reaches 100%.
 
 In emergency cases, you may want to skip the analysis phase and ship changes directly to production. 
 At any time you can set the `spec.skipAnalysis: true`. 
@@ -152,6 +159,34 @@ And the time it takes for a canary to be rollback when the metrics or webhook ch
 interval * threshold 
 ```
 
+Istio example:
+
+```yaml
+  analysis:
+    interval: 1m
+    threshold: 10
+    iterations: 2
+    match:
+      - headers:
+          x-canary:
+            exact: "insider"
+      - headers:
+          cookie:
+            regex: "^(.*?;)?(canary=always)(;.*)?$"
+      - sourceLabels:
+          app.kubernetes.io/name: "scheduler"
+```
+
+The header keys must be lowercase and use hyphen as the separator.
+Header values are case-sensitive and formatted as follows:
+- `exact: "value"` for exact string match
+- `prefix: "value"` for prefix-based match
+- `suffix: "value"` for suffix-based match
+- `regex: "value"` for [RE2](https://github.com/google/re2/wiki/Syntax) style regex-based match
+
+Note that the `sourceLabels` match conditions are applicable only when the `mesh` gateway
+is included in the `canary.service.gateways` list.
+
 App Mesh example:
 
 ```yaml
@@ -198,7 +233,8 @@ NGINX example:
             exact: "canary"
 ```
 
-Note that the NGINX ingress controller supports only exact matching for a single header and the cookie value is set to `always`.
+Note that the NGINX ingress controller supports only exact matching for cookies names where the value must be set to `always`.
+Starting with NGINX ingress v0.31, regex matching is supported for header values.
 
 The above configurations will route users with the x-canary header or canary cookie to the canary instance during analysis:
 

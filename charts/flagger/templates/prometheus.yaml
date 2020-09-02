@@ -230,10 +230,10 @@ spec:
       serviceAccountName: {{ template "flagger.serviceAccountName" . }}-prometheus
       containers:
         - name: prometheus
-          image: "docker.io/prom/prometheus:v2.16.0"
+          image: {{ .Values.prometheus.image }}
           imagePullPolicy: IfNotPresent
           args:
-            - '--storage.tsdb.retention=2h'
+            - '--storage.tsdb.retention={{ .Values.prometheus.retention }}'
             - '--config.file=/etc/prometheus/prometheus.yml'
           ports:
             - containerPort: 9090

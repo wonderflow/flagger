@@ -1,18 +1,11 @@
-FROM alpine:3.11
+FROM alpine:3.12
 
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
-RUN addgroup -S flagger \
-    && adduser -S -g flagger flagger \
-    && apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates
 
-WORKDIR /home/flagger
+USER nobody
 
-COPY /bin/flagger .
-
-RUN chown -R flagger:flagger ./
-
-USER flagger
+COPY --chown=nobody:nobody /bin/flagger .
 
 ENTRYPOINT ["./flagger"]
-

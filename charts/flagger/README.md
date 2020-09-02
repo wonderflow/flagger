@@ -7,13 +7,12 @@ Flagger can run automated application analysis, testing, promotion and rollback 
 * A/B Testing (HTTP headers and cookies traffic routing)
 * Blue/Green (traffic switching and mirroring)
 
-Flagger works with service mesh solutions (Istio, Linkerd, AWS App Mesh) and with Kubernetes ingress controllers (NGINX, Gloo, Contour).
+Flagger works with service mesh solutions (Istio, Linkerd, AWS App Mesh) and with Kubernetes ingress controllers (NGINX, Skipper, Gloo, Contour).
 Flagger can be configured to send alerts to various chat platforms such as Slack, Microsoft Teams, Discord and Rocket.
 
 ## Prerequisites
 
-* Kubernetes >= 1.11
-* Prometheus >= 2.6
+* Kubernetes >= 1.14
 
 ## Installing the Chart
 
@@ -52,7 +51,7 @@ To install Flagger for **AWS App Mesh**:
 ```console
 $ helm upgrade -i flagger flagger/flagger \
     --namespace=appmesh-system \
-    --set meshProvider=appmesh \
+    --set meshProvider=appmesh:v1beta2 \
     --set metricsServer=http://appmesh-prometheus:9090
 ```
 
@@ -80,6 +79,7 @@ To install Flagger and Prometheus for **Contour**:
 $ helm upgrade -i flagger flagger/flagger \
     --namespace=projectcontour \
     --set meshProvider=contour \
+    --set ingressClass=contour \
     --set prometheus.install=true
 ```
 
@@ -90,7 +90,7 @@ The [configuration](#configuration) section lists the parameters that can be con
 To uninstall/delete the `flagger` deployment:
 
 ```console
-$ helm delete --purge flagger
+$ helm delete flagger
 ```
 
 The command removes all the Kubernetes components associated with the chart and deletes the release.
@@ -105,8 +105,9 @@ Parameter | Description | Default
 `image.tag` | Image tag | `<VERSION>`
 `image.pullPolicy` | Image pull policy | `IfNotPresent`
 `logLevel` | Log level | `info`
-`prometheus.install` | If `true`, installs Prometheus configured to scrape all pods in the custer including the App Mesh sidecar | `false`
 `metricsServer` | Prometheus URL, used when `prometheus.install` is `false` | `http://prometheus.istio-system:9090`
+`prometheus.install` | If `true`, installs Prometheus configured to scrape all pods in the custer | `false`
+`prometheus.retention` |  Prometheus data retention | `2h`
 `selectorLabels` | List of labels that Flagger uses to create pod selectors | `app,name,app.kubernetes.io/name`
 `configTracking.enabled` | If `true`, flagger will track changes in Secrets and ConfigMaps referenced in the target deployment | `true`
 `eventWebhook` | If set, Flagger will publish events to the given webhook | None
@@ -133,9 +134,13 @@ Parameter | Description | Default
 `resources.limits/memory` | Pod memory limit | `512Mi`
 `affinity` | Node/pod affinities | None
 `nodeSelector` | Node labels for pod assignment | `{}`
+`threadiness` | Number of controller workers | `2`
 `tolerations` | List of node taints to tolerate | `[]`
 `istio.kubeconfig.secretName` | The name of the Kubernetes secret containing the Istio shared control plane kubeconfig | None
 `istio.kubeconfig.key` | The name of Kubernetes secret data key that contains the Istio control plane kubeconfig | `kubeconfig`
+`ingressAnnotationsPrefix` | Annotations prefix for NGINX ingresses | None
+`ingressClass` | Ingress class used for annotating HTTPProxy objects, e.g. `contour` | None
+`podPriorityClassName` | PriorityClass name for pod priority configuration | ""
 
 Specify each parameter using the `--set key=value[,key=value]` argument to `helm upgrade`. For example,
 

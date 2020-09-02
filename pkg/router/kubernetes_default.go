@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -24,7 +25,6 @@ type KubernetesDefaultRouter struct {
 	flaggerClient clientset.Interface
 	logger        *zap.SugaredLogger
 	labelSelector string
-	annotations   map[string]string
 	ports         map[string]int32
 }
 
@@ -33,13 +33,13 @@ func (c *KubernetesDefaultRouter) Initialize(canary *flaggerv1.Canary) error {
 	_, primaryName, canaryName := canary.GetServiceNames()
 
 	// canary svc
-	err := c.reconcileService(canary, canaryName, canary.Spec.TargetRef.Name)
+	err := c.reconcileService(canary, canaryName, canary.Spec.TargetRef.Name, canary.Spec.Service.Canary)
 	if err != nil {
 		return fmt.Errorf("reconcileService failed: %w", err)
 	}
 
 	// primary svc
-	err = c.reconcileService(canary, primaryName, fmt.Sprintf("%s-primary", canary.Spec.TargetRef.Name))
+	err = c.reconcileService(canary, primaryName, fmt.Sprintf("%s-primary", canary.Spec.TargetRef.Name), canary.Spec.Service.Primary)
 	if err != nil {
 		return fmt.Errorf("reconcileService failed: %w", err)
 	}
@@ -52,7 +52,7 @@ func (c *KubernetesDefaultRouter) Reconcile(canary *flaggerv1.Canary) error {
 	apexName, _, _ := canary.GetServiceNames()
 
 	// main svc
-	err := c.reconcileService(canary, apexName, fmt.Sprintf("%s-primary", canary.Spec.TargetRef.Name))
+	err := c.reconcileService(canary, apexName, fmt.Sprintf("%s-primary", canary.Spec.TargetRef.Name), canary.Spec.Service.Apex)
 	if err != nil {
 		return fmt.Errorf("reconcileService failed: %w", err)
 	}
@@ -68,7 +68,7 @@ func (c *KubernetesDefaultRouter) GetRoutes(_ *flaggerv1.Canary) (primaryRoute i
 	return 0, 0, nil
 }
 
-func (c *KubernetesDefaultRouter) reconcileService(canary *flaggerv1.Canary, name string, podSelector string) error {
+func (c *KubernetesDefaultRouter) reconcileService(canary *flaggerv1.Canary, name string, podSelector string, metadata *flaggerv1.CustomMetadata) error {
 	portName := canary.Spec.Service.PortName
 	if portName == "" {
 		portName = "http"
@@ -112,15 +112,28 @@ func (c *KubernetesDefaultRouter) reconcileService(canary *flaggerv1.Canary, nam
 		svcSpec.Ports = append(svcSpec.Ports, cp)
 	}
 
+	if metadata == nil {
+		metadata = &flaggerv1.CustomMetadata{}
+	}
+
+	if metadata.Labels == nil {
+		metadata.Labels = make(map[string]string)
+	}
+	metadata.Labels[c.labelSelector] = name
+
+	if metadata.Annotations == nil {
+		metadata.Annotations = make(map[string]string)
+	}
+
 	// create service if it doesn't exists
-	svc, err := c.kubeClient.CoreV1().Services(canary.Namespace).Get(name, metav1.GetOptions{})
+	svc, err := c.kubeClient.CoreV1().Services(canary.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		svc = &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        name,
 				Namespace:   canary.Namespace,
-				Labels:      map[string]string{c.labelSelector: name},
-				Annotations: c.annotations,
+				Labels:      metadata.Labels,
+				Annotations: metadata.Annotations,
 				OwnerReferences: []metav1.OwnerReference{
 					*metav1.NewControllerRef(canary, schema.GroupVersionKind{
 						Group:   flaggerv1.SchemeGroupVersion.Group,
@@ -132,7 +145,7 @@ func (c *KubernetesDefaultRouter) reconcileService(canary *flaggerv1.Canary, nam
 			Spec: svcSpec,
 		}
 
-		_, err := c.kubeClient.CoreV1().Services(canary.Namespace).Create(svc)
+		_, err := c.kubeClient.CoreV1().Services(canary.Namespace).Create(context.TODO(), svc, metav1.CreateOptions{})
 		if err != nil {
 			return fmt.Errorf("service %s.%s create error: %w", svc.Name, canary.Namespace, err)
 		}
@@ -160,13 +173,34 @@ func (c *KubernetesDefaultRouter) reconcileService(canary *flaggerv1.Canary, nam
 			}
 		}
 
+		updateService := false
+		svcClone := svc.DeepCopy()
+
 		portsDiff := cmp.Diff(svcSpec.Ports, svc.Spec.Ports, cmpopts.SortSlices(sortPorts))
 		selectorsDiff := cmp.Diff(svcSpec.Selector, svc.Spec.Selector)
 		if portsDiff != "" || selectorsDiff != "" {
-			svcClone := svc.DeepCopy()
 			svcClone.Spec.Ports = svcSpec.Ports
 			svcClone.Spec.Selector = svcSpec.Selector
-			_, err = c.kubeClient.CoreV1().Services(canary.Namespace).Update(svcClone)
+			updateService = true
+		}
+
+		// update annotations and labels only if the service has been created by Flagger
+		if _, owned := c.isOwnedByCanary(svc, canary.Name); owned {
+			if svc.ObjectMeta.Annotations == nil {
+				svc.ObjectMeta.Annotations = make(map[string]string)
+			}
+			if diff := cmp.Diff(metadata.Annotations, svc.ObjectMeta.Annotations); diff != "" {
+				svcClone.ObjectMeta.Annotations = metadata.Annotations
+				updateService = true
+			}
+			if diff := cmp.Diff(metadata.Labels, svc.ObjectMeta.Labels); diff != "" {
+				svcClone.ObjectMeta.Labels = metadata.Labels
+				updateService = true
+			}
+		}
+
+		if updateService {
+			_, err = c.kubeClient.CoreV1().Services(canary.Namespace).Update(context.TODO(), svcClone, metav1.UpdateOptions{})
 			if err != nil {
 				return fmt.Errorf("service %s update error: %w", name, err)
 			}
@@ -182,7 +216,7 @@ func (c *KubernetesDefaultRouter) reconcileService(canary *flaggerv1.Canary, nam
 func (c *KubernetesDefaultRouter) Finalize(canary *flaggerv1.Canary) error {
 	apexName, _, _ := canary.GetServiceNames()
 
-	svc, err := c.kubeClient.CoreV1().Services(canary.Namespace).Get(apexName, metav1.GetOptions{})
+	svc, err := c.kubeClient.CoreV1().Services(canary.Namespace).Get(context.TODO(), apexName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("service %s.%s get query error: %w", apexName, canary.Namespace, err)
 	}
@@ -199,11 +233,11 @@ func (c *KubernetesDefaultRouter) Finalize(canary *flaggerv1.Canary) error {
 			clone := svc.DeepCopy()
 			clone.Spec.Selector = storedSvc.Spec.Selector
 
-			if _, err := c.kubeClient.CoreV1().Services(canary.Namespace).Update(clone); err != nil {
+			if _, err := c.kubeClient.CoreV1().Services(canary.Namespace).Update(context.TODO(), clone, metav1.UpdateOptions{}); err != nil {
 				return fmt.Errorf("service %s update error: %w", clone.Name, err)
 			}
 		} else {
-			err = c.reconcileService(canary, apexName, canary.Spec.TargetRef.Name)
+			err = c.reconcileService(canary, apexName, canary.Spec.TargetRef.Name, nil)
 			if err != nil {
 				return fmt.Errorf("reconcileService failed: %w", err)
 			}

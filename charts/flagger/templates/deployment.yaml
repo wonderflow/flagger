@@ -48,11 +48,15 @@ spec:
           secret:
             secretName: "{{ .Values.istio.kubeconfig.secretName }}"
         {{- end }}
+      {{- if .Values.podPriorityClassName }}
+      priorityClassName: {{ .Values.podPriorityClassName }}
+      {{- end }}                  
       containers:
         - name: flagger
+          {{- if .Values.securityContext.enabled }}
           securityContext:
-            readOnlyRootFilesystem: true
-            runAsUser: 10001
+{{ toYaml .Values.securityContext.context | indent 12 }}
+          {{- end }}
           volumeMounts:
             {{- if .Values.istio.kubeconfig.secretName }}
             - name: kubeconfig
@@ -102,11 +106,17 @@ spec:
           {{- if .Values.ingressAnnotationsPrefix }}
           - -ingress-annotations-prefix={{ .Values.ingressAnnotationsPrefix }}
           {{- end }}
+          {{- if .Values.ingressClass }}
+          - -ingress-class={{ .Values.ingressClass }}
+          {{- end }}
           {{- if .Values.eventWebhook }}
           - -event-webhook={{ .Values.eventWebhook }}
           {{- end }}
           {{- if .Values.istio.kubeconfig.secretName }}
           - -kubeconfig-service-mesh=/tmp/istio-host/{{ .Values.istio.kubeconfig.key }}
+          {{- end }}
+          {{- if .Values.threadiness }}
+          - -threadiness={{ .Values.threadiness }}
           {{- end }}
           livenessProbe:
             exec:

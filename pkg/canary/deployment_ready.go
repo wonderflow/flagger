@@ -1,6 +1,7 @@
 package canary
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -12,17 +13,17 @@ import (
 
 // IsPrimaryReady checks the primary deployment status and returns an error if
 // the deployment is in the middle of a rolling update or if the pods are unhealthy
-// it will return a non retriable error if the rolling update is stuck
+// it will return a non retryable error if the rolling update is stuck
 func (c *DeploymentController) IsPrimaryReady(cd *flaggerv1.Canary) error {
 	primaryName := fmt.Sprintf("%s-primary", cd.Spec.TargetRef.Name)
-	primary, err := c.kubeClient.AppsV1().Deployments(cd.Namespace).Get(primaryName, metav1.GetOptions{})
+	primary, err := c.kubeClient.AppsV1().Deployments(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("deployment %s.%s get query error: %w", primaryName, cd.Namespace, err)
 	}
 
 	_, err = c.isDeploymentReady(primary, cd.GetProgressDeadlineSeconds())
 	if err != nil {
-		return fmt.Errorf("primary deployment %s.%s not ready: %w", primaryName, cd.Namespace, err)
+		return fmt.Errorf("%s.%s not ready: %w", primaryName, cd.Namespace, err)
 	}
 
 	if primary.Spec.Replicas == int32p(0) {
@@ -37,7 +38,7 @@ func (c *DeploymentController) IsPrimaryReady(cd *flaggerv1.Canary) error {
 // it will return a non retriable error if the rolling update is stuck
 func (c *DeploymentController) IsCanaryReady(cd *flaggerv1.Canary) (bool, error) {
 	targetName := cd.Spec.TargetRef.Name
-	canary, err := c.kubeClient.AppsV1().Deployments(cd.Namespace).Get(targetName, metav1.GetOptions{})
+	canary, err := c.kubeClient.AppsV1().Deployments(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
 		return true, fmt.Errorf("deployment %s.%s get query error: %w", targetName, cd.Namespace, err)
 	}
@@ -45,8 +46,8 @@ func (c *DeploymentController) IsCanaryReady(cd *flaggerv1.Canary) (bool, error)
 	retryable, err := c.isDeploymentReady(canary, cd.GetProgressDeadlineSeconds())
 	if err != nil {
 		return retryable, fmt.Errorf(
-			"canary deployment %s.%s not ready with retryable %v: %w",
-			targetName, cd.Namespace, retryable, err,
+			"canary deployment %s.%s not ready: %w",
+			targetName, cd.Namespace, err,
 		)
 	}
 	return true, nil
@@ -81,7 +82,6 @@ func (c *DeploymentController) isDeploymentReady(deployment *appsv1.Deployment, 
 			return retriable, fmt.Errorf("waiting for rollout to finish: %d of %d updated replicas are available",
 				deployment.Status.AvailableReplicas, deployment.Status.UpdatedReplicas)
 		}
-
 	} else {
 		return true, fmt.Errorf(
 			"waiting for rollout to finish: observed deployment generation less then desired generation")

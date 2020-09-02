@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -55,13 +56,13 @@ func (f fixture) makeCanaryReady(t *testing.T) {
 func (f fixture) makeReady(t *testing.T, name string) {
 	p, err := f.kubeClient.AppsV1().
 		Deployments("default").
-		Get(name, metav1.GetOptions{})
+		Get(context.TODO(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 
 	p.Status = appsv1.DeploymentStatus{Replicas: 1, UpdatedReplicas: 1,
 		ReadyReplicas: 1, AvailableReplicas: 1}
 
-	_, err = f.kubeClient.AppsV1().Deployments("default").Update(p)
+	_, err = f.kubeClient.AppsV1().Deployments("default").Update(context.TODO(), p, metav1.UpdateOptions{})
 	require.NoError(t, err)
 }
 
@@ -103,10 +104,10 @@ func newDeploymentFixture(c *flaggerv1.Canary) fixture {
 	}
 
 	// init router
-	rf := router.NewFactory(nil, kubeClient, flaggerClient, "annotationsPrefix", logger, flaggerClient)
+	rf := router.NewFactory(nil, kubeClient, flaggerClient, "annotationsPrefix", "", logger, flaggerClient)
 
 	// init observer
-	observerFactory, _ := observers.NewFactory("fake")
+	observerFactory, _ := observers.NewFactory(testMetricsServerURL)
 
 	// init canary factory
 	configTracker := &canary.ConfigTracker{
@@ -137,7 +138,7 @@ func newDeploymentFixture(c *flaggerv1.Canary) fixture {
 	ctrl.flaggerInformers.MetricInformer.Informer().GetIndexer().Add(newDeploymentTestMetricTemplate())
 	ctrl.flaggerInformers.AlertInformer.Informer().GetIndexer().Add(newDeploymentTestAlertProvider())
 
-	meshRouter := rf.MeshRouter("istio")
+	meshRouter := rf.MeshRouter("istio", "")
 
 	return fixture{
 		canary:        c,
@@ -707,7 +708,7 @@ func newDeploymentTestHPA() *hpav2.HorizontalPodAutoscaler {
 func newDeploymentTestMetricTemplate() *flaggerv1.MetricTemplate {
 	provider := flaggerv1.MetricTemplateProvider{
 		Type:    "prometheus",
-		Address: "fake",
+		Address: testMetricsServerURL,
 		SecretRef: &corev1.LocalObjectReference{
 			Name: "podinfo-secret-env",
 		},

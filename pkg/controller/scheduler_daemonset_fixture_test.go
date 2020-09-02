@@ -76,10 +76,10 @@ func newDaemonSetFixture(c *flaggerv1.Canary) daemonSetFixture {
 	}
 
 	// init router
-	rf := router.NewFactory(nil, kubeClient, flaggerClient, "annotationsPrefix", logger, flaggerClient)
+	rf := router.NewFactory(nil, kubeClient, flaggerClient, "annotationsPrefix", "", logger, flaggerClient)
 
 	// init observer
-	observerFactory, _ := observers.NewFactory("fake")
+	observerFactory, _ := observers.NewFactory(testMetricsServerURL)
 
 	// init canary factory
 	configTracker := &canary.ConfigTracker{
@@ -110,7 +110,7 @@ func newDaemonSetFixture(c *flaggerv1.Canary) daemonSetFixture {
 	ctrl.flaggerInformers.MetricInformer.Informer().GetIndexer().Add(newDaemonSetTestMetricTemplate())
 	ctrl.flaggerInformers.AlertInformer.Informer().GetIndexer().Add(newDaemonSetTestAlertProvider())
 
-	meshRouter := rf.MeshRouter("istio")
+	meshRouter := rf.MeshRouter("istio", "")
 
 	return daemonSetFixture{
 		canary:        c,
@@ -613,36 +613,10 @@ func newDaemonSetTestService() *corev1.Service {
 	return d
 }
 
-func newDaemonSetTestServiceV2() *corev1.Service {
-	d := &corev1.Service{
-		TypeMeta: metav1.TypeMeta{APIVersion: appsv1.SchemeGroupVersion.String()},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "default",
-			Name:      "podinfo",
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": "podinfo-v2",
-			},
-			Type: corev1.ServiceTypeClusterIP,
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "http",
-					Port:       9898,
-					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromString("http"),
-				},
-			},
-		},
-	}
-
-	return d
-}
-
 func newDaemonSetTestMetricTemplate() *flaggerv1.MetricTemplate {
 	provider := flaggerv1.MetricTemplateProvider{
 		Type:    "prometheus",
-		Address: "fake",
+		Address: testMetricsServerURL,
 		SecretRef: &corev1.LocalObjectReference{
 			Name: "podinfo-secret-env",
 		},

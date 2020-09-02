@@ -1,18 +1,17 @@
 package controller
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 
 	flaggerv1 "github.com/weaveworks/flagger/pkg/apis/flagger/v1beta1"
 	"github.com/weaveworks/flagger/pkg/canary"
 	"github.com/weaveworks/flagger/pkg/router"
-)
-
-const (
-	MetricsProviderServiceSuffix = ":service"
 )
 
 // scheduleCanaries synchronises the canary map with the jobs map,
@@ -86,7 +85,7 @@ func (c *Controller) scheduleCanaries() {
 func (c *Controller) advanceCanary(name string, namespace string) {
 	begin := time.Now()
 	// check if the canary exists
-	cd, err := c.flaggerClient.FlaggerV1beta1().Canaries(namespace).Get(name, metav1.GetOptions{})
+	cd, err := c.flaggerClient.FlaggerV1beta1().Canaries(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		c.logger.With("canary", fmt.Sprintf("%s.%s", name, namespace)).
 			Errorf("Canary %s.%s not found", name, namespace)
@@ -108,32 +107,53 @@ func (c *Controller) advanceCanary(name string, namespace string) {
 	}
 
 	// init Kubernetes router
-	kubeRouter := c.routerFactory.KubernetesRouter(cd.Spec.TargetRef.Kind, labelSelector, map[string]string{}, ports)
+	kubeRouter := c.routerFactory.KubernetesRouter(cd.Spec.TargetRef.Kind, labelSelector, ports)
+
+	// reconcile the canary/primary services
 	if err := kubeRouter.Initialize(cd); err != nil {
 		c.recordEventWarningf(cd, "%v", err)
 		return
 	}
 
-	// create primary
+	// check metric servers' availability
+	if !cd.SkipAnalysis() && (cd.Status.Phase == "" || cd.Status.Phase == flaggerv1.CanaryPhaseInitializing) {
+		if err := c.checkMetricProviderAvailability(cd); err != nil {
+			c.recordEventErrorf(cd, "Error checking metric providers: %v", err)
+		}
+	}
+
+	// init mesh router
+	meshRouter := c.routerFactory.MeshRouter(provider, labelSelector)
+
+	// register the AppMesh VirtualNodes before creating the primary deployment
+	// otherwise the pods will not be injected with the Envoy proxy
+	if strings.HasPrefix(provider, flaggerv1.AppMeshProvider) {
+		if err := meshRouter.Reconcile(cd); err != nil {
+			c.recordEventWarningf(cd, "%v", err)
+			return
+		}
+	}
+
+	// create primary workload
 	err = canaryController.Initialize(cd)
 	if err != nil {
 		c.recordEventWarningf(cd, "%v", err)
 		return
 	}
 
-	// init mesh router
-	meshRouter := c.routerFactory.MeshRouter(provider)
-
-	// create or update svc
+	// change the apex service pod selector to primary
 	if err := kubeRouter.Reconcile(cd); err != nil {
 		c.recordEventWarningf(cd, "%v", err)
 		return
 	}
 
-	// create or update mesh routes
-	if err := meshRouter.Reconcile(cd); err != nil {
-		c.recordEventWarningf(cd, "%v", err)
-		return
+	// take over an existing virtual service or ingress
+	// runs after the primary is ready to ensure zero downtime
+	if !strings.HasPrefix(provider, flaggerv1.AppMeshProvider) {
+		if err := meshRouter.Reconcile(cd); err != nil {
+			c.recordEventWarningf(cd, "%v", err)
+			return
+		}
 	}
 
 	// check for changes
@@ -231,23 +251,9 @@ func (c *Controller) advanceCanary(name string, namespace string) {
 		}
 	}
 
-	// route all traffic to primary if analysis has succeeded
+	// route traffic back to primary if analysis has succeeded
 	if cd.Status.Phase == flaggerv1.CanaryPhasePromoting {
-		if provider != "kubernetes" {
-			c.recordEventInfof(cd, "Routing all traffic to primary")
-			if err := meshRouter.SetRoutes(cd, 100, 0, false); err != nil {
-				c.recordEventWarningf(cd, "%v", err)
-				return
-			}
-			c.recorder.SetWeight(cd, 100, 0)
-		}
-
-		// update status phase
-		if err := canaryController.SetStatusPhase(cd, flaggerv1.CanaryPhaseFinalising); err != nil {
-			c.recordEventWarningf(cd, "%v", err)
-			return
-		}
-
+		c.runPromotionTrafficShift(cd, canaryController, meshRouter, provider, canaryWeight, primaryWeight)
 		return
 	}
 
@@ -292,7 +298,7 @@ func (c *Controller) advanceCanary(name string, namespace string) {
 	// check if the canary success rate is above the threshold
 	// skip check if no traffic is routed or mirrored to canary
 	if canaryWeight == 0 && cd.Status.Iterations == 0 &&
-		(cd.GetAnalysis().Mirror == false || mirrored == false) {
+		!(cd.GetAnalysis().Mirror && mirrored) {
 		c.recordEventInfof(cd, "Starting canary analysis for %s.%s", cd.Spec.TargetRef.Name, cd.Namespace)
 
 		// run pre-rollout web hooks
@@ -312,7 +318,7 @@ func (c *Controller) advanceCanary(name string, namespace string) {
 	}
 
 	// use blue/green strategy for kubernetes provider
-	if provider == "kubernetes" {
+	if provider == flaggerv1.KubernetesProvider {
 		if len(cd.GetAnalysis().Match) > 0 {
 			c.recordEventWarningf(cd, "A/B testing is not supported when using the kubernetes provider")
 			cd.GetAnalysis().Match = nil
@@ -343,6 +349,63 @@ func (c *Controller) advanceCanary(name string, namespace string) {
 
 }
 
+func (c *Controller) runPromotionTrafficShift(canary *flaggerv1.Canary, canaryController canary.Controller,
+	meshRouter router.Interface, provider string, canaryWeight int, primaryWeight int) {
+	// finalize promotion since no traffic shifting is possible for Kubernetes CNI
+	if provider == flaggerv1.KubernetesProvider {
+		if err := canaryController.SetStatusPhase(canary, flaggerv1.CanaryPhaseFinalising); err != nil {
+			c.recordEventWarningf(canary, "%v", err)
+		}
+		return
+	}
+
+	// route all traffic to primary in one go when promotion step wight is not set
+	if canary.Spec.Analysis.StepWeightPromotion == 0 {
+		c.recordEventInfof(canary, "Routing all traffic to primary")
+		if err := meshRouter.SetRoutes(canary, 100, 0, false); err != nil {
+			c.recordEventWarningf(canary, "%v", err)
+			return
+		}
+		c.recorder.SetWeight(canary, 100, 0)
+		if err := canaryController.SetStatusPhase(canary, flaggerv1.CanaryPhaseFinalising); err != nil {
+			c.recordEventWarningf(canary, "%v", err)
+		}
+		return
+	}
+
+	// increment the primary traffic weight until it reaches 100%
+	if canaryWeight > 0 {
+		primaryWeight += canary.GetAnalysis().StepWeightPromotion
+		if primaryWeight > 100 {
+			primaryWeight = 100
+		}
+		canaryWeight -= canary.GetAnalysis().StepWeightPromotion
+		if canaryWeight < 0 {
+			canaryWeight = 0
+		}
+		if err := meshRouter.SetRoutes(canary, primaryWeight, canaryWeight, false); err != nil {
+			c.recordEventWarningf(canary, "%v", err)
+			return
+		}
+		c.recorder.SetWeight(canary, primaryWeight, canaryWeight)
+		c.recordEventInfof(canary, "Advance %s.%s primary weight %v", canary.Name, canary.Namespace, primaryWeight)
+
+		// finalize promotion
+		if primaryWeight == 100 {
+			if err := canaryController.SetStatusPhase(canary, flaggerv1.CanaryPhaseFinalising); err != nil {
+				c.recordEventWarningf(canary, "%v", err)
+			}
+		} else {
+			if err := canaryController.SetStatusWeight(canary, canaryWeight); err != nil {
+				c.recordEventWarningf(canary, "%v", err)
+			}
+		}
+	}
+
+	return
+
+}
+
 func (c *Controller) runCanary(canary *flaggerv1.Canary, canaryController canary.Controller,
 	meshRouter router.Interface, mirrored bool, canaryWeight int, primaryWeight int, maxWeight int) {
 	primaryName := fmt.Sprintf("%s-primary", canary.Spec.TargetRef.Name)
@@ -353,7 +416,7 @@ func (c *Controller) runCanary(canary *flaggerv1.Canary, canaryController canary
 		// When mirroring, all requests go to primary and canary, but only responses from
 		// primary go back to the user.
 		if canary.GetAnalysis().Mirror && canaryWeight == 0 {
-			if mirrored == false {
+			if !mirrored {
 				mirrored = true
 				primaryWeight = 100
 				canaryWeight = 0
@@ -465,7 +528,7 @@ func (c *Controller) runBlueGreen(canary *flaggerv1.Canary, canaryController can
 	if canary.GetAnalysis().Iterations > canary.Status.Iterations {
 		// If in "mirror" mode, mirror requests during the entire B/G canary test
 		if provider != "kubernetes" &&
-			canary.GetAnalysis().Mirror == true && mirrored == false {
+			canary.GetAnalysis().Mirror && !mirrored {
 			if err := meshRouter.SetRoutes(canary, 100, 0, true); err != nil {
 				c.recordEventWarningf(canary, "%v", err)
 			}
@@ -632,6 +695,13 @@ func (c *Controller) checkCanaryStatus(canary *flaggerv1.Canary, canaryControlle
 		return true
 	}
 
+	var err error
+	canary, err = c.flaggerClient.FlaggerV1beta1().Canaries(canary.Namespace).Get(context.TODO(), canary.Name, metav1.GetOptions{})
+	if err != nil {
+		c.logger.With("canary", fmt.Sprintf("%s.%s", canary.Name, canary.Namespace)).Errorf("%v", err)
+		return false
+	}
+
 	if canary.Status.Phase == "" || canary.Status.Phase == flaggerv1.CanaryPhaseInitializing {
 		if err := canaryController.SyncStatus(canary, flaggerv1.CanaryStatus{Phase: flaggerv1.CanaryPhaseInitialized}); err != nil {
 			c.logger.With("canary", fmt.Sprintf("%s.%s", canary.Name, canary.Namespace)).Errorf("%v", err)
@@ -648,7 +718,7 @@ func (c *Controller) checkCanaryStatus(canary *flaggerv1.Canary, canaryControlle
 		canaryPhaseProgressing := canary.DeepCopy()
 		canaryPhaseProgressing.Status.Phase = flaggerv1.CanaryPhaseProgressing
 		c.recordEventInfof(canaryPhaseProgressing, "New revision detected! Scaling up %s.%s", canaryPhaseProgressing.Spec.TargetRef.Name, canaryPhaseProgressing.Namespace)
-		c.alert(canaryPhaseProgressing, "New revision detected, starting canary analysis.",
+		c.alert(canaryPhaseProgressing, "New revision detected, progressing canary analysis.",
 			true, flaggerv1.SeverityInfo)
 
 		if err := canaryController.ScaleFromZero(canary); err != nil {
@@ -714,4 +784,33 @@ func (c *Controller) rollback(canary *flaggerv1.Canary, canaryController canary.
 
 	c.recorder.SetStatus(canary, flaggerv1.CanaryPhaseFailed)
 	c.runPostRolloutHooks(canary, flaggerv1.CanaryPhaseFailed)
+}
+
+func (c *Controller) setPhaseInitializing(cd *flaggerv1.Canary) error {
+	phase := flaggerv1.CanaryPhaseInitializing
+	firstTry := true
+	name, ns := cd.GetName(), cd.GetNamespace()
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() (err error) {
+		if !firstTry {
+			cd, err = c.flaggerClient.FlaggerV1beta1().Canaries(ns).Get(context.TODO(), name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("canary %s.%s get query failed: %w", name, ns, err)
+			}
+		}
+
+		if ok, conditions := canary.MakeStatusConditions(cd, phase); ok {
+			cdCopy := cd.DeepCopy()
+			cdCopy.Status.Conditions = conditions
+			cdCopy.Status.LastTransitionTime = metav1.Now()
+			cdCopy.Status.Phase = phase
+			_, err = c.flaggerClient.FlaggerV1beta1().Canaries(cd.Namespace).UpdateStatus(context.TODO(), cdCopy, metav1.UpdateOptions{})
+		}
+		firstTry = false
+		return
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed after retries: %w", err)
+	}
+	return nil
 }

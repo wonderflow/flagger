@@ -2,6 +2,158 @@
 
 All notable changes to this project are documented in this file.
 
+## 1.1.0 (2020-08-18) 
+
+Add support for Skipper ingress controller
+
+#### Features
+
+- Skipper Ingress Controller support
+    [#670](https://github.com/weaveworks/flagger/pull/670)
+- Support per-config configTracker disable via ConfigMap/Secret annotation
+    [#671](https://github.com/weaveworks/flagger/pull/671)
+
+#### Improvements
+
+- Add priorityClassName and securityContext to Helm charts
+    [#652](https://github.com/weaveworks/flagger/pull/652)
+    [#668](https://github.com/weaveworks/flagger/pull/668)
+- Update Kubernetes packages to v1.18.8
+    [#672](https://github.com/weaveworks/flagger/pull/672)
+- Update Istio, Linkerd and Contour e2e tests
+    [#661](https://github.com/weaveworks/flagger/pull/661)
+
+#### Fixes
+
+- Fix O(log n) bug over network in GetTargetConfigs
+    [#663](https://github.com/weaveworks/flagger/pull/663)
+- Fix(grafana): metrics change since Kubernetes 1.16
+    [#663](https://github.com/weaveworks/flagger/pull/663)
+
+## 1.0.1 (2020-07-18) 
+
+Add support for App Mesh Gateway GA
+
+#### Improvements
+
+- Update App Mesh docs to v1beta2 API
+    [#649](https://github.com/weaveworks/flagger/pull/649)
+- Add threadiness to Flagger helm chart
+    [#643](https://github.com/weaveworks/flagger/pull/643)
+- Add Istio virtual service to loadtester helm chart
+    [#643](https://github.com/weaveworks/flagger/pull/643)
+
+#### Fixes
+
+- Fix multiple paths per rule on canary ingress
+    [#632](https://github.com/weaveworks/flagger/pull/632)
+- Fix installers for kustomize >= 3.6.0
+    [#646](https://github.com/weaveworks/flagger/pull/646)
+
+## 1.0.0 (2020-06-17) 
+
+This is the GA release for Flagger v1.0.0.
+
+The upgrade procedure from 0.x to 1.0 can be found [here](https://docs.flagger.app/dev/upgrade-guide).
+
+Two new resources were added to the API: `MetricTemplate` and `AlertProvider`.
+The analysis can reference [metric templates](https://docs.flagger.app//usage/metrics#custom-metrics)
+to query Prometheus, Datadog and AWS CloudWatch.
+[Alerting](https://docs.flagger.app/v/master/usage/alerting#canary-configuration) can be configured on a per
+canary basis for Slack, MS Teams, Discord and Rocket.
+
+#### Features
+
+- Implement progressive promotion
+    [#593](https://github.com/weaveworks/flagger/pull/593)
+
+#### Improvements
+
+- istio: Add source labels to analysis matching rules
+    [#594](https://github.com/weaveworks/flagger/pull/594)
+- istio: Add allow origins field to CORS spec
+    [#604](https://github.com/weaveworks/flagger/pull/604)
+- istio: Change builtin metrics to work with Istio telemetry v2
+    [#623](https://github.com/weaveworks/flagger/pull/623)
+- appmesh: Implement App Mesh v1beta2 timeout
+    [#611](https://github.com/weaveworks/flagger/pull/611)
+- metrics: Check metrics server availability during canary initialization
+    [#592](https://github.com/weaveworks/flagger/pull/592)
+
+## 1.0.0-rc.5 (2020-05-14) 
+
+This is a release candidate for Flagger v1.0.0.
+
+The upgrade procedure from 0.x to 1.0 can be found [here](https://docs.flagger.app/dev/upgrade-guide).
+
+#### Features
+
+- Add support for AWS AppMesh v1beta2 API
+    [#584](https://github.com/weaveworks/flagger/pull/584)
+- Add support for Contour v1.4 ingress class
+    [#588](https://github.com/weaveworks/flagger/pull/588)
+- Add user-specified labels/annotations to the generated Services
+    [#538](https://github.com/weaveworks/flagger/pull/538)
+
+#### Improvements
+
+- Support compatible Prometheus service
+    [#557](https://github.com/weaveworks/flagger/pull/557)
+- Update e2e tests and packages to Kubernetes v1.18
+    [#549](https://github.com/weaveworks/flagger/pull/549)
+    [#576](https://github.com/weaveworks/flagger/pull/576)
+
+#### Fixes
+
+- pkg/controller: retry canary initialization on conflict
+    [#586](https://github.com/weaveworks/flagger/pull/586)
+
+## 1.0.0-rc.4 (2020-04-03) 
+
+This is a release candidate for Flagger v1.0.0.
+
+The upgrade procedure from 0.x to 1.0 can be found [here](https://docs.flagger.app/dev/upgrade-guide).
+
+**Breaking change**: the minimum supported version of Kubernetes is v1.14.0.
+
+#### Features
+
+- Implement NGINX Ingress header regex matching
+    [#546](https://github.com/weaveworks/flagger/pull/546)
+
+#### Improvements
+
+- pkg/router: update ingress API to networking.k8s.io/v1beta1
+    [#534](https://github.com/weaveworks/flagger/pull/534)
+- loadtester: add return cmd output option
+    [#535](https://github.com/weaveworks/flagger/pull/535)
+- refactoring: finalizer error handling and unit testing
+    [#531](https://github.com/weaveworks/flagger/pull/535)
+    [#530](https://github.com/weaveworks/flagger/pull/530)
+- chart: add finalizers to RBAC rules for OpenShift
+    [#537](https://github.com/weaveworks/flagger/pull/537)
+- chart: allow security context to be disabled on OpenShift
+    [#543](https://github.com/weaveworks/flagger/pull/543)
+- chart: add annotations for service account 
+    [#521](https://github.com/weaveworks/flagger/pull/521)
+- docs: Add Prometheus Operator tutorial
+    [#524](https://github.com/weaveworks/flagger/pull/524)
+
+#### Fixes
+
+- pkg/controller: avoid status conflicts on initialization
+    [#544](https://github.com/weaveworks/flagger/pull/544)
+- pkg/canary: fix status retry
+    [#541](https://github.com/weaveworks/flagger/pull/541)
+- loadtester: fix timeout errors
+    [#539](https://github.com/weaveworks/flagger/pull/539)
+- pkg/canary/daemonset: fix readiness check
+    [#529](https://github.com/weaveworks/flagger/pull/529)
+- logs: reduce log verbosity and fix typos
+    [#540](https://github.com/weaveworks/flagger/pull/540)
+    [#526](https://github.com/weaveworks/flagger/pull/526)
+
+
 ## 1.0.0-rc.3 (2020-03-23) 
 
 This is a release candidate for Flagger v1.0.0.

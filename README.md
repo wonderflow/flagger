@@ -13,7 +13,7 @@ by gradually shifting traffic to the new version while measuring metrics and run
 ![flagger-overview](https://raw.githubusercontent.com/weaveworks/flagger/master/docs/diagrams/flagger-canary-overview.png)
 
 Flagger implements several deployment strategies (Canary releases, A/B testing, Blue/Green mirroring)
-using a service mesh (App Mesh, Istio, Linkerd) or an ingress controller (Contour, Gloo, NGINX) for traffic routing.
+using a service mesh (App Mesh, Istio, Linkerd) or an ingress controller (Contour, Gloo, NGINX, Skipper) for traffic routing.
 For release analysis, Flagger can query Prometheus, Datadog or CloudWatch
 and for alerting it uses Slack, MS Teams, Discord and Rocket.
 
@@ -37,6 +37,7 @@ Flagger documentation can be found at [docs.flagger.app](https://docs.flagger.ap
   * [Contour](https://docs.flagger.app/tutorials/contour-progressive-delivery)
   * [Gloo](https://docs.flagger.app/tutorials/gloo-progressive-delivery)
   * [NGINX Ingress](https://docs.flagger.app/tutorials/nginx-progressive-delivery)
+  * [Skipper](https://docs.flagger.app/tutorials/skipper-progressive-delivery)
   * [Kubernetes Blue/Green](https://docs.flagger.app/tutorials/kubernetes-blue-green)
 
 ### Who is using Flagger
@@ -46,7 +47,9 @@ List of organizations using Flagger:
 * [Chick-fil-A](https://www.chick-fil-a.com)
 * [Capra Consulting](https://www.capraconsulting.no)
 * [DMM.com](https://dmm-corp.com)
+* [MediaMarktSaturn](https://www.mediamarktsaturn.com)
 * [Weaveworks](https://weave.works)
+* [Jumia Group](https://group.jumia.com)
 
 If you are using Flagger, please submit a PR to add your organization to the list!
 
@@ -69,7 +72,7 @@ metadata:
   namespace: test
 spec:
   # service mesh provider (optional)
-  # can be: kubernetes, istio, linkerd, appmesh, nginx, contour, gloo, supergloo
+  # can be: kubernetes, istio, linkerd, appmesh, nginx, skipper, contour, gloo, supergloo
   provider: istio
   # deployment reference
   targetRef:
@@ -136,7 +139,7 @@ spec:
         max: 500
       interval: 30s
     - name: "database connections"
-      # custom Prometheus check
+      # custom metric check
       templateRef:
         name: db-connections
       thresholdRange:
@@ -178,17 +181,32 @@ For more details on how the canary analysis and promotion works please [read the
 
 ### Features
 
-| Feature                                      | Istio              | Linkerd            | App Mesh           | NGINX              | Gloo               | Contour            | CNI                |
-| -------------------------------------------- | ------------------ | ------------------ |------------------  |------------------  |------------------  |------------------  |------------------  |
-| Canary deployments (weighted traffic)        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: |
-| A/B testing (headers and cookies routing)    | :heavy_check_mark: | :heavy_minus_sign: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: | :heavy_check_mark: | :heavy_minus_sign: |
-| Blue/Green deployments (traffic switch)      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-| Webhooks (acceptance/load testing)           | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-| Manual gating (approve/pause/resume)         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-| Request success rate check (L7 metric)       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: |
-| Request duration check (L7 metric)           | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: |
-| Custom promql checks                         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-| Traffic policy, CORS, retries and timeouts   | :heavy_check_mark: | :heavy_minus_sign: | :heavy_minus_sign: | :heavy_minus_sign: | :heavy_minus_sign: | :heavy_check_mark: | :heavy_minus_sign: |
+**Service Mesh**
+
+| Feature                                    | App Mesh           | Istio              | Linkerd            |  Kubernetes CNI    |
+| ------------------------------------------ | ------------------ | ------------------ | ------------------ |  ----------------- |
+| Canary deployments (weighted traffic)      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: |
+| A/B testing (headers and cookies routing)  | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: | :heavy_minus_sign: |
+| Blue/Green deployments (traffic switch)    | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| Blue/Green deployments (traffic mirroring) | :heavy_minus_sign: | :heavy_check_mark: | :heavy_minus_sign: | :heavy_minus_sign: |
+| Webhooks (acceptance/load testing)         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| Manual gating (approve/pause/resume)       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| Request success rate check (L7 metric)     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: |
+| Request duration check (L7 metric)         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: |
+| Custom metric checks                       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+
+**Ingress**
+
+| Feature                                    | Contour            | Gloo               | NGINX              | Skipper            |
+| ------------------------------------------ | ------------------ | ------------------ | ------------------ | ------------------ |
+| Canary deployments (weighted traffic)      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| A/B testing (headers and cookies routing)  | :heavy_check_mark: | :heavy_minus_sign: | :heavy_check_mark: | :heavy_minus_sign: |
+| Blue/Green deployments (traffic switch)    | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| Webhooks (acceptance/load testing)         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| Manual gating (approve/pause/resume)       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| Request success rate check (L7 metric)     | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: | :heavy_check_mark: |
+| Request duration check (L7 metric)         | :heavy_check_mark: | :heavy_check_mark: | :heavy_minus_sign: | :heavy_check_mark: |
+| Custom metric checks                       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
 
 ### Roadmap
 
